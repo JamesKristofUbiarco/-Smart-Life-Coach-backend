@@ -6,8 +6,6 @@ from datetime import datetime, timezone
 import uuid
 from fastapi.responses import StreamingResponse
 import httpx
-
-# 🧪 LAB: Importar módulos de laboratorio
 from lab.stream_v6 import generar_respuesta_v6, STREAM_HEADERS
 from lab.crud_planes import router as planes_router
 
@@ -105,6 +103,4 @@ async def recibir_mensaje(request:Request):
         media_type="text/event-stream"
     )
 
-
-# 🧪 LAB: Registrar el router de CRUD con Supabase (reemplaza el mock_db)
 app.include_router(planes_router)
