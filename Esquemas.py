@@ -14,7 +14,7 @@ from typing import List, Literal, Optional
 #----------------------------------
 class MessagePart(BaseModel):
     type: str  
-    text: str
+    text: Optional[str] = None
 
 
 class Message(BaseModel):
@@ -67,4 +67,6 @@ class ChatPayload(BaseModel):
     trigger: str
     user_name: Optional[str] = None
     age: Optional[int] = None
+    token: Optional[str] = None
+    ai_settings: Optional[dict] = None
 #-----------------------------------
