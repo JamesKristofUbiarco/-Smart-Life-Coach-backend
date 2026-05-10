@@ -65,3 +65,31 @@ async def crear_sesion(request: Request, user_id: str = Depends(get_current_user
         print(f"❌ Error al crear sesión: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@router.delete("/sessions/{session_id}")
+async def eliminar_sesion(session_id: str, user_id: str = Depends(get_current_user_id)):
+    """Elimina una sesión de chat y sus mensajes (en cascada o manualmente)"""
+    try:
+        supabase = get_supabase()
+        
+        # Verificar que la sesión es del usuario
+        session_check = supabase.table("chat_sessions").select("id").eq("id", session_id).eq("user_id", user_id).execute()
+        if not session_check.data:
+            raise HTTPException(status_code=404, detail="Sesión no encontrada o no autorizada")
+
+        # Primero borrar mensajes por si no hay CASCADE
+        supabase.table("chat_messages").delete().eq("session_id", session_id).execute()
+        
+        # Luego borrar sesión
+        response = supabase.table("chat_sessions").delete().eq("id", session_id).eq("user_id", user_id).execute()
+        
+        if response.data:
+            return {"status": "success", "deleted_session": session_id}
+        else:
+            return {"status": "error", "message": "No se pudo eliminar la sesión"}
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error al eliminar sesión: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
