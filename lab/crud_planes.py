@@ -63,33 +63,38 @@ async def crear_plan(request: Request, user_id: str = Depends(get_current_user_i
 
 
 @router.patch("/{item_id}")
-async def actualizar_estado(
+async def actualizar_item(
     item_id: str,
     request: Request,
     user_id: str = Depends(get_current_user_id),
 ):
     """
-    Actualiza el estado de un plan o tarea en Supabase.
+    Actualiza cualquier campo de un plan o tarea en Supabase.
     """
     body = await request.json()
-    nuevo_estado = body.get("status")
+    
+    campos_permitidos = ["title", "description", "status", "due_date", "parent_id", "priority"]
+    update_data = {k: v for k, v in body.items() if k in campos_permitidos}
+
+    if not update_data:
+        raise HTTPException(status_code=400, detail="No hay campos válidos para actualizar")
 
     try:
         supabase = get_supabase()
         response = (
             supabase.table("goals")
-            .update({"status": nuevo_estado})
+            .update(update_data)
             .eq("id", item_id)
             .eq("user_id", user_id)  # Seguridad: solo el dueño puede modificar
             .execute()
         )
 
         if response.data:
-            print(f"✅ Supabase actualizó item {item_id} a: {nuevo_estado}")
+            print(f"✅ Supabase actualizó item {item_id}: {update_data}")
             return {
                 "status": "success",
                 "item_id": item_id,
-                "new_status": nuevo_estado,
+                "updated_fields": update_data,
             }
         else:
             return {"status": "error", "message": "Item no encontrado"}

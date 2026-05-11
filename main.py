@@ -36,12 +36,29 @@ async def generar_respuesta(texto: str):
     # 4. Evento de fin
     yield f'data: {{"type":"text-end","id":"{msg_id}"}}\n\n'
 
+from lab.crud_chat import router as chat_router
+from lab.supabase_client import get_supabase
+
 @app.post("/Chat")
 async def recibir_mensaje(request:Request):
     cuerpo = await request.json()
-    print(cuerpo)
     mensajes= cuerpo.get("messages",[])
-    print(f"\n{mensajes}")
+    session_id = cuerpo.get("session_id", str(uuid.uuid4()))
+    ai_settings = cuerpo.get("ai_settings", {})
+    
+    # Extraer token
+    auth_header = request.headers.get("Authorization")
+    token = None
+    user_id = None
+    if auth_header and auth_header.startswith("Bearer "):
+        token = auth_header.split(" ")[1]
+        try:
+            supabase = get_supabase()
+            user_response = supabase.auth.get_user(token)
+            if user_response and user_response.user:
+                user_id = user_response.user.id
+        except Exception as e:
+            print(f"Error verificando token en Chat: {e}")
 
     # Extraer el último mensaje del usuario
     texto_recibido = "(sin mensaje)"
@@ -50,51 +67,65 @@ async def recibir_mensaje(request:Request):
         partes= ultimo_mensaje.get("parts",[])
         if partes:
             texto_recibido = partes[0].get("text","")
-            print(f"Mensaje recibido: {texto_recibido}")
+
+    # Guardar en base de datos si hay usuario
+    if user_id:
+        supabase = get_supabase()
+        # Verificar si existe la sesión, si no, crearla
+        try:
+            sesion = supabase.table("chat_sessions").select("id").eq("id", session_id).execute()
+            if not sesion.data:
+                supabase.table("chat_sessions").insert({
+                    "id": session_id,
+                    "user_id": user_id,
+                    "title": texto_recibido[:30] + "..." if len(texto_recibido) > 30 else texto_recibido
+                }).execute()
+            
+            # Guardar mensaje del usuario
+            supabase.table("chat_messages").insert({
+                "session_id": session_id,
+                "sender": "user",
+                "content": texto_recibido
+            }).execute()
+        except Exception as e:
+            print(f"Error guardando mensaje de usuario: {e}")
 
     # Intentar llamar al AI-component (puerto 8001)
     try:
         url = "http://localhost:8001/chat"
+        # ⚠️ Cambiamos el payload para enviar TODOS los mensajes y el token
         payload = ChatPayload(
-                    id="123",
-                    messages=[
-                        {
-                            "id": str(uuid.uuid4()),
-                            "role": "user",
-                            "parts": [
-                                {
-                                    "type": "text",
-                                    "text": texto_recibido
-                                }
-                            ]
-                        }
-                    ],
+                    id=session_id,
+                    messages=mensajes,
                     trigger="chat",
-                    user_name="Jose",
-                    age=22
+                    user_name=cuerpo.get("user_name", "Usuario"),
+                    age=22,
+                    token=token,
+                    ai_settings=ai_settings
                 )
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.post(url, json=payload.model_dump())
         if response.status_code != 200:
             raise Exception(f"AI-component respondió {response.status_code}")
-        coach = CoachResponse(**response.json())
+        data = response.json()
+        coach_dict = data.get("coach_response", {})
+        coach = CoachResponse(**coach_dict)
         respuesta_texto = coach.summary
     except Exception as e:
         # 🧪 LAB: Si el AI-component no está disponible, devolver echo diagnóstico
         print(f"⚠️ AI-component no disponible ({e}), usando echo diagnóstico")
-        roles = [m.get("role", "?") for m in mensajes]
-        respuesta_texto = (
-            f"✅ **Echo diagnóstico** (AI-component no conectado)\n\n"
-            f'Tu mensaje: *"{texto_recibido}"*\n\n'
-            f"| Campo | Valor |\n"
-            f"|-------|-------|\n"
-            f"| Mensajes en historial | {len(mensajes)} |\n"
-            f"| Roles | {', '.join(roles)} |\n"
-            f"| AI-component | ❌ No disponible |\n"
-            f"| Stream | ✅ AI SDK v6 |\n\n"
-            f"> Cuando el AI-component esté corriendo en el puerto 8001, "
-            f"verás la respuesta real de Gemini aquí."
-        )
+        respuesta_texto = f"El Coach no está disponible. Error: {e}"
+
+    # Guardar la respuesta de la IA
+    if user_id:
+        try:
+            supabase.table("chat_messages").insert({
+                "session_id": session_id,
+                "sender": "ai",
+                "content": respuesta_texto
+            }).execute()
+        except Exception as e:
+            print(f"Error guardando mensaje de la IA: {e}")
 
     # 🧪 LAB: Usar stream v6 en vez del formato antiguo
     return StreamingResponse(
@@ -104,3 +135,4 @@ async def recibir_mensaje(request:Request):
     )
 
 app.include_router(planes_router)
+app.include_router(chat_router)
